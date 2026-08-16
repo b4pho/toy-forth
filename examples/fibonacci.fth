@@ -1,0 +1,14 @@
+0 1 15
+
+DUP 0 >
+18 JZ
+1 -
+ROT ROT
+SWAP OVER +
+ROT
+
+3 JMP
+
+DROP
+SWAP DROP
+. CR

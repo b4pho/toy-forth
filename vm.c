@@ -19,6 +19,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdbool.h>
+#include <stdint.h>
 #include <math.h>
 #include <string.h>
 
@@ -33,9 +34,10 @@ typedef void (*tf_func)(tf_context *);
 
 typedef int32_t tf_int;
 typedef float tf_float;
-typedef u_int32_t tf_pointer;
+typedef uint32_t tf_pointer;
 typedef unsigned char tf_char;
 typedef unsigned char tf_bool;
+typedef uint8_t tf_byte;
 
 typedef enum {
     TF_INT,
@@ -47,16 +49,13 @@ typedef enum {
 } tf_type;
 
 typedef struct {
-    char name[16];
     tf_func code;
 } tf_op;
 
 typedef struct {
-    tf_op* items;
-    u_int8_t size;
+    tf_op items[MAX_NATIVE_OPS];
+    tf_byte size;
 } tf_op_list;
-
-typedef u_int8_t tf_byte;
 
 typedef struct {
     tf_type type;
@@ -92,19 +91,13 @@ struct tf_context {
 };
 
 void tf_init_ops(tf_op_list* operations) {
-    operations -> items = malloc(sizeof(tf_op) * MAX_NATIVE_OPS);
-    if (operations -> items == NULL) {
-        perror("failed to define operations list\n");
-        exit(-1);
-    }
     operations -> size = 0;
 }
 
-void tf_add_op(tf_op_list* operations, const char* name, tf_func code) {
+void tf_add_op(tf_op_list* operations, tf_func code) {
     if (operations == NULL) return;
     if (operations -> size + 1 >= MAX_NATIVE_OPS) return;
-    strncpy(operations -> items[(operations -> size)++].name, name, strlen(name));
-    operations -> items[(operations -> size) - 1].code = code;
+    operations -> items[(operations -> size)++].code = code;
 }
 
 tf_int tf_code_pop_int(tf_context* ctx) {
@@ -262,13 +255,14 @@ void tf_op_mod(tf_context* ctx) {
 void tf_op_dup(tf_context* ctx) {
     tf_word a = tf_pop(&ctx->data_stack);
     tf_push(&ctx->data_stack, a);
+    tf_push(&ctx->data_stack, a);
 }
 
 void tf_op_swap(tf_context* ctx) {
     tf_word b = tf_pop(&ctx->data_stack);
     tf_word a = tf_pop(&ctx->data_stack);
-    tf_push(&ctx->data_stack, a);
     tf_push(&ctx->data_stack, b);
+    tf_push(&ctx->data_stack, a);
 }
 
 void tf_op_over(tf_context* ctx) {
@@ -276,10 +270,20 @@ void tf_op_over(tf_context* ctx) {
     tf_word a = tf_pop(&ctx->data_stack);
     tf_push(&ctx->data_stack, a);
     tf_push(&ctx->data_stack, b);
+    tf_push(&ctx->data_stack, a);
 }
 
 void tf_op_drop(tf_context* ctx) {
     tf_pop(&ctx->data_stack);
+}
+
+void tf_op_rot(tf_context* ctx) {
+    tf_word c = tf_pop(&ctx->data_stack);
+    tf_word b = tf_pop(&ctx->data_stack);
+    tf_word a = tf_pop(&ctx->data_stack);
+    tf_push(&ctx->data_stack, b);
+    tf_push(&ctx->data_stack, c);
+    tf_push(&ctx->data_stack, a);
 }
 
 void tf_op_eq(tf_context* ctx) {
@@ -486,30 +490,31 @@ void tf_op_jump(tf_context* ctx) {
 
 void tf_init(tf_context* ctx) {
     tf_init_ops(&(ctx -> ops));
-    tf_add_op(&(ctx -> ops), "DUP", tf_op_dup);
-    tf_add_op(&(ctx -> ops), "OVER", tf_op_over);
-    tf_add_op(&(ctx -> ops), "SWAP", tf_op_swap);
-    tf_add_op(&(ctx -> ops), "DROP", tf_op_drop);
-    tf_add_op(&(ctx -> ops), "+", tf_op_add);
-    tf_add_op(&(ctx -> ops), "-", tf_op_sub);
-    tf_add_op(&(ctx -> ops), "*", tf_op_mul);
-    tf_add_op(&(ctx -> ops), "/", tf_op_div);
-    tf_add_op(&(ctx -> ops), "POW", tf_op_pow);
-    tf_add_op(&(ctx -> ops), "MOD", tf_op_mod);
-    tf_add_op(&(ctx -> ops), "=", tf_op_eq);
-    tf_add_op(&(ctx -> ops), "<>", tf_op_neq);
-    tf_add_op(&(ctx -> ops), "<", tf_op_lt);
-    tf_add_op(&(ctx -> ops), ">", tf_op_gt);
-    tf_add_op(&(ctx -> ops), "<=", tf_op_lte);
-    tf_add_op(&(ctx -> ops), ">=", tf_op_gte);
-    tf_add_op(&(ctx -> ops), "0=", tf_op_not);
-    tf_add_op(&(ctx -> ops), "AND", tf_op_and);
-    tf_add_op(&(ctx -> ops), "OR", tf_op_or);
-    tf_add_op(&(ctx -> ops), ".", tf_op_print_word);
-    tf_add_op(&(ctx -> ops), "CR", tf_op_print_newline);
-    tf_add_op(&(ctx -> ops), "JZ", tf_op_jump_false);
-    tf_add_op(&(ctx -> ops), "JE", tf_op_jump_true);
-    tf_add_op(&(ctx -> ops), "JMP", tf_op_jump);
+    tf_add_op(&(ctx -> ops), tf_op_dup);
+    tf_add_op(&(ctx -> ops), tf_op_over);
+    tf_add_op(&(ctx -> ops), tf_op_swap);
+    tf_add_op(&(ctx -> ops), tf_op_drop);
+    tf_add_op(&(ctx -> ops), tf_op_rot);
+    tf_add_op(&(ctx -> ops), tf_op_add);
+    tf_add_op(&(ctx -> ops), tf_op_sub);
+    tf_add_op(&(ctx -> ops), tf_op_mul);
+    tf_add_op(&(ctx -> ops), tf_op_div);
+    tf_add_op(&(ctx -> ops), tf_op_pow);
+    tf_add_op(&(ctx -> ops), tf_op_mod);
+    tf_add_op(&(ctx -> ops), tf_op_eq);
+    tf_add_op(&(ctx -> ops), tf_op_neq);
+    tf_add_op(&(ctx -> ops), tf_op_lt);
+    tf_add_op(&(ctx -> ops), tf_op_gt);
+    tf_add_op(&(ctx -> ops), tf_op_lte);
+    tf_add_op(&(ctx -> ops), tf_op_gte);
+    tf_add_op(&(ctx -> ops), tf_op_not);
+    tf_add_op(&(ctx -> ops), tf_op_and);
+    tf_add_op(&(ctx -> ops), tf_op_or);
+    tf_add_op(&(ctx -> ops), tf_op_print_word);
+    tf_add_op(&(ctx -> ops), tf_op_print_newline);
+    tf_add_op(&(ctx -> ops), tf_op_jump_false);
+    tf_add_op(&(ctx -> ops), tf_op_jump_true);
+    tf_add_op(&(ctx -> ops), tf_op_jump);
     ctx -> code_stack.bytes = malloc(sizeof(tf_byte) * CODE_STACK_SIZE);
     ctx -> code_stack.cursor = 0;
     ctx -> data_stack.words = malloc(sizeof(tf_word) * DATA_STACK_SIZE);
@@ -527,74 +532,6 @@ void tf_destroy(tf_context* ctx) {
     free(ctx->data_stack.words);
     free(ctx->return_stack.words);
     free(ctx->word_address);
-}
-
-u_int8_t tf_look_for_op(tf_context* ctx, const char* name, tf_op** ret_op) {
-    for(u_int8_t i = 0; i <= ctx -> ops.size; i++) {
-        tf_op op = ctx -> ops.items[i];
-        if (strcmp(op.name, name) == 0) {
-            *ret_op = ctx->ops.items + i;
-            return i;
-        }
-    }
-    *ret_op = NULL;
-    return 0;
-} 
-
-int tf_parse(tf_context* ctx, const char *input) {
-    size_t input_len = strlen(input);
-    char* code = malloc(sizeof(char) * (input_len + 1));
-    if (code == NULL) {
-        return -1;
-    }
-    strncpy(code, input, input_len);
-    code[input_len] = '\0';
-    
-    char *token = strtok(code, " \t\n");
-
-    tf_int integer_value;
-    tf_float float_value;
-    tf_char char_value;
-    tf_bool bool_value;
-    tf_pointer pointer_value;
-    tf_op* op;
-    int j = 0;
-    
-    while (token != NULL) {
-        int read_integer = sscanf(token, "%d", &integer_value);
-        int read_float = sscanf(token, "%f", &float_value);
-        int read_char = sscanf(token, "'%c'", &char_value);
-        int read_true = sscanf(token, "true");
-        int read_false = sscanf(token, "false");
-        int read_pointer = sscanf(token, "0x%x", &pointer_value);
-        
-        // keeping track of word addresses
-        ctx->word_address[j++] = ctx->code_stack.cursor;
-
-        if (read_integer) {
-            tf_code_push_int(ctx, integer_value);
-        } else if (read_float) {
-            tf_code_push_float(ctx, float_value);
-        } else if (read_char) {
-            tf_code_push_char(ctx, char_value);
-        } else if (read_true || read_false) {
-            tf_code_push_bool(ctx, read_true);
-        } else if (read_pointer) {
-            tf_code_push_int(ctx, pointer_value);
-        } else {
-            u_int8_t op_index = tf_look_for_op(ctx, token, &op);
-            if (op != NULL) {
-                tf_code_push_op(ctx, op_index);
-            } else {
-                printf("Unknown token: %s\n", token);
-                exit(-1);
-            }
-        }
-        token = strtok(NULL, " \t\n");
-    }
-
-    free(code);
-    return 0;
 }
 
 unsigned char* tf_get_bytecode(tf_context* ctx, size_t* bytecode_size) {
@@ -662,7 +599,7 @@ void tf_exec(tf_context* ctx) {
                 tf_byte op_index = ctx->code_stack.bytes[i++];
                 tf_op op = ctx->ops.items[op_index];
                 if (op.code == NULL) {
-                    printf("Error: '%s' operator is not defined\n", op.name);
+                    printf("Error: #%x operator is not defined\n", op_index);
                     exit(-2);
                 } else {
                     op.code(ctx);
@@ -714,21 +651,6 @@ void tf_exec(tf_context* ctx) {
     printf("\n");
 }
 
-int tf_save_to_file(tf_context* ctx, const char* filename) {
-    size_t bytecode_size = 0;
-    unsigned char* bytecode = tf_get_bytecode(ctx, &bytecode_size);
-    // tf_debug_byte_array(bytecode, bytecode_size);
-    FILE *file = fopen(filename, "wb");
-    if (file == NULL) {
-        printf("Error: Cannot open '%s'.\n", filename);
-        return 0; 
-    }
-    size_t written_bytes = fwrite(bytecode, sizeof(unsigned char), bytecode_size, file);
-    fclose(file);
-    free(bytecode);
-    return (written_bytes == bytecode_size) ? 1 : 0;
-}
-
 void tf_load(tf_context* ctx, const unsigned char* bytecode, size_t bytecode_size) {
     int j = 0;
     int next_bytes = 0;
@@ -778,33 +700,16 @@ size_t tf_load_from_file(tf_context* ctx, const char* filename) {
 }
 
 int main(int argc, char** argv) {
+    if (argc != 2) {
+        printf("USAGE: %s [input-file]\n", argv[0]);
+        exit(0);
+    }
+
+    char* input_filename = argv[1];
+
     tf_context ctx;
     tf_init(&ctx);
-    tf_parse(&ctx,
-             "1 2 > 8 JZ 'T' 9 JMP 'F' . CR " \
-             "2 1 > 17 JZ 'T' 20 JMP 'F' . CR " \
-             "1 41 + . CR "  \
-             "43 1 - . CR "  \
-             "6 7 * . CR "   \
-             "84 2 / . CR "  \
-             "9 2 POW . CR " \
-             "4 2 MOD . CR " \
-             "3 2 MOD . CR " \
-             "4 2 < . CR " \
-             "3 2 > . CR " \
-             // "1 2 > IF 'T' ELSE 'F' THEN . CR " \ // This stuff requires a better parsing... but the jumps logic works! (half job's done)
-             // "2 1 > IF 'T' ELSE 'F' THEN . CR " 
-             "CR");
-    int done = tf_save_to_file(&ctx, "code.bin");
-    if (!done) {
-        printf("Error while saving file!\n");
-        exit(-1);
-    }
-    tf_destroy(&ctx);
-
-    // testing a whole new context only reading bytecode
-    tf_init(&ctx);
-    tf_load_from_file(&ctx, "code.bin");
+    tf_load_from_file(&ctx, input_filename);
     tf_exec(&ctx);
     tf_destroy(&ctx);
     return 0;
