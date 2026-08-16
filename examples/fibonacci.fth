@@ -12,3 +12,17 @@ ROT
 DROP
 SWAP DROP
 . CR
+CR
+CR
+CR
+
+0 1 15 BEGIN
+   ROT ROT
+   SWAP OVER +
+   ROT
+   1 -
+   DUP 0 =
+UNTIL
+DROP
+SWAP DROP
+. CR

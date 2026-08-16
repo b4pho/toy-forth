@@ -29,7 +29,7 @@
 #define DATA_STACK_SIZE        256
 #define RETURN_STACK_SIZE        2
 #define MAX_OP_NAME_SIZE        16
-#define MAX_IF_NESTED_CYCLES  1024
+#define MAX_NESTED_CYCLES  1024
 
 typedef struct tf_context tf_context;
 
@@ -106,6 +106,19 @@ typedef struct {
     tf_token_list else_node;
     tf_pointer then_pos;
 } tf_if_box;
+
+typedef struct {
+    tf_pointer begin_pos;
+    tf_pointer repeat_pos;
+    tf_token_list while_node;
+    tf_token_list repeat_node;
+} tf_while_box;
+
+typedef struct {
+    tf_pointer do_pos;
+    tf_pointer loop_pos;
+    tf_token_list do_node;
+} tf_loop_box;
 
 void tf_init_ops(tf_op_list* operations) {
     operations -> size = 0;
@@ -457,13 +470,17 @@ void tf_macro_parse(tf_context* ctx, tf_token_list* code) {
     int t = 0;
 
     // Max cyclomatic complexity allowed here is A LOT!
-    tf_if_box if_stack[MAX_IF_NESTED_CYCLES] = {0};
+    tf_if_box if_stack[MAX_NESTED_CYCLES] = {0};
+    tf_while_box while_stack[MAX_NESTED_CYCLES] = {0};
+    tf_loop_box loop_stack[MAX_NESTED_CYCLES] = {0};
     int if_i = 0;
+    int while_i = 0;
+    int loop_i = 0;
 
     tf_token_list token = *code;
     while(token != NULL) {
         if (strcmp(token->value, "IF") == 0) {
-            if (if_i >= MAX_IF_NESTED_CYCLES) {
+            if (if_i >= MAX_NESTED_CYCLES) {
                 printf("Error: Max cyclomatic complexity reached!\n");
                 exit(-1);
             }
@@ -493,6 +510,50 @@ void tf_macro_parse(tf_context* ctx, tf_token_list* code) {
             strcpy(if_stack[if_i-1].if_node->value, else_address);
             strcpy(if_stack[if_i-1].else_node->value, then_address);
             if_i--;
+        } else if (strcmp(token->value, "BEGIN") == 0) {
+            if (while_i >= MAX_NESTED_CYCLES) {
+                printf("Error: Max cyclomatic complexity reached!\n");
+                exit(-1);
+            }
+            while_stack[while_i++].begin_pos = t;
+            tf_remove_node_from_code_list(code, t);
+            token = token -> prev;
+            t--;
+        } else if (strcmp(token->value, "WHILE") == 0) {
+            while_stack[while_i-1].while_node = token;
+            strcpy(token->value, "10");
+            tf_add_node_to_code_list(code, t, "JZ");
+            token = token -> next;
+            t++;
+        } else if (strcmp(token->value, "REPEAT") == 0) {
+            while_stack[while_i-1].repeat_pos = t+2;
+            while_stack[while_i-1].repeat_node = token;
+            strcpy(token->value, "10");
+            tf_add_node_to_code_list(code, t, "JMP");
+            token = token -> next;
+            t++;
+            char begin_address[32] = {0};
+            char repeat_address[32] = {0};
+            snprintf(begin_address, sizeof(begin_address), "%d", while_stack[while_i-1].begin_pos);
+            snprintf(repeat_address, sizeof(repeat_address), "%d", while_stack[while_i-1].repeat_pos);
+            strcpy(while_stack[while_i-1].while_node->value, repeat_address);
+            strcpy(while_stack[while_i-1].repeat_node->value, begin_address);
+            while_i--;
+        } else if (strcmp(token->value, "UNTIL") == 0) {
+            while_stack[while_i-1].repeat_node = token;
+            strcpy(token->value, "10");
+            tf_add_node_to_code_list(code, t, "JZ");
+            token = token -> next;
+            t++;
+            char begin_address[32] = {0};
+            char repeat_address[32] = {0};
+            snprintf(begin_address, sizeof(begin_address), "%d", while_stack[while_i-1].begin_pos);
+            strcpy(while_stack[while_i-1].repeat_node->value, begin_address);
+            while_i--;
+        } else if (strcmp(token->value, "DO") == 0) {
+            // TODO
+        } else if (strcmp(token->value, "LOOP") == 0) {
+            // TODO
         }
         
         token = token -> next;
@@ -548,7 +609,10 @@ void tf_base_parse(tf_context* ctx, tf_token_list list) {
 void tf_parse(tf_context* ctx, const char* input) {
     tf_token_list code = NULL;
     tf_parse_to_code_list(input, &code);
+    // tf_debug_code_list(code);
     tf_macro_parse(ctx, &code);
+    // tf_debug_code_list(code);
+    // exit(0);
     tf_base_parse(ctx, code);
     tf_destroy_code_list(&code);
 }

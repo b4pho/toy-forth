@@ -1,3 +1,21 @@
+3
+BEGIN
+ DUP 0 >
+WHILE  
+   'A' . CR
+   1 -
+REPEAT DROP
+'B' . CR CR
+
+3
+BEGIN
+   'A' . CR
+   1 -
+   DUP 0 =
+UNTIL
+DROP
+'B' . CR CR
+
 3 2 > IF
    'T' 'F' = IF
       'A'
