@@ -26,9 +26,11 @@
 #define MAX_NATIVE_OPS       256
 #define CODE_STACK_SIZE    65536
 #define DATA_STACK_SIZE      256
-#define RETURN_STACK_SIZE      2
+#define RETURN_STACK_SIZE    256
 
 typedef struct tf_context tf_context;
+
+void tf_destroy(tf_context* ctx);
 
 typedef void (*tf_func)(tf_context *);
 
@@ -488,8 +490,60 @@ void tf_op_jump(tf_context* ctx) {
     ctx -> jumped_to = a;
 }
 
+void tf_op_jump_for_loop(tf_context* ctx) {
+    tf_pointer do_address = tf_pop(&ctx->data_stack).data.as_pointer;
+
+    tf_int limit = ctx->return_stack.words[ctx->return_stack.cursor-1].data.as_int;
+    tf_int index = ctx->return_stack.words[ctx->return_stack.cursor-2].data.as_int;
+    
+    ctx->return_stack.words[ctx->return_stack.cursor-2].data.as_int = ++index;
+
+    if (index < limit) {
+        ctx -> jumped_to = do_address;
+    } else {
+        ctx->return_stack.cursor -= 2;
+    }
+}
+
+void tf_op_do_loop_index(tf_context* ctx) {
+    tf_int depth = tf_pop(&ctx->data_stack).data.as_int;
+    tf_int offset = depth * 2;
+    if (ctx->return_stack.cursor >= offset) {
+        tf_int index = ctx->return_stack.words[ctx->return_stack.cursor-offset].data.as_int;
+        tf_push_int(&ctx->data_stack, index);
+    } else {
+        printf("Error: loop index out of bounds!\n");
+        exit(-1);
+    }
+}
+
+void tf_op_halt(tf_context* ctx) {
+    tf_destroy(ctx);
+    exit(0);
+}
+
+void tf_op_return(tf_context* ctx) {
+    tf_int a = tf_pop(&ctx->data_stack).data.as_int;
+    tf_destroy(ctx);
+    exit(a);
+}
+
+void tf_op_from_return_stack(tf_context* ctx) {
+    tf_word a = tf_pop(&ctx->return_stack);
+    tf_push(&ctx->data_stack, a);
+}
+
+void tf_op_to_return_stack(tf_context* ctx) {
+    tf_word a = tf_pop(&ctx->data_stack);
+    tf_push(&ctx->return_stack, a);
+}
+
 void tf_init(tf_context* ctx) {
     tf_init_ops(&(ctx -> ops));
+    tf_add_op(&(ctx -> ops), tf_op_halt);
+    tf_add_op(&(ctx -> ops), tf_op_return);
+    tf_add_op(&(ctx -> ops), tf_op_from_return_stack);
+    tf_add_op(&(ctx -> ops), tf_op_to_return_stack);
     tf_add_op(&(ctx -> ops), tf_op_dup);
     tf_add_op(&(ctx -> ops), tf_op_over);
     tf_add_op(&(ctx -> ops), tf_op_swap);
@@ -515,6 +569,8 @@ void tf_init(tf_context* ctx) {
     tf_add_op(&(ctx -> ops), tf_op_jump_false);
     tf_add_op(&(ctx -> ops), tf_op_jump_true);
     tf_add_op(&(ctx -> ops), tf_op_jump);
+    tf_add_op(&(ctx -> ops), tf_op_jump_for_loop);
+    tf_add_op(&(ctx -> ops), tf_op_do_loop_index);
     ctx -> code_stack.bytes = malloc(sizeof(tf_byte) * CODE_STACK_SIZE);
     ctx -> code_stack.cursor = 0;
     ctx -> data_stack.words = malloc(sizeof(tf_word) * DATA_STACK_SIZE);

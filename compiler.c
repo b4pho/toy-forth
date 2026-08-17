@@ -27,9 +27,9 @@
 #define MAX_NATIVE_OPS         256
 #define CODE_STACK_SIZE      65536
 #define DATA_STACK_SIZE        256
-#define RETURN_STACK_SIZE        2
+#define RETURN_STACK_SIZE      256
 #define MAX_OP_NAME_SIZE        16
-#define MAX_NESTED_CYCLES  1024
+#define MAX_NESTED_CYCLES     1024
 
 typedef struct tf_context tf_context;
 
@@ -109,15 +109,11 @@ typedef struct {
 
 typedef struct {
     tf_pointer begin_pos;
-    tf_pointer repeat_pos;
     tf_token_list while_node;
-    tf_token_list repeat_node;
 } tf_while_box;
 
 typedef struct {
     tf_pointer do_pos;
-    tf_pointer loop_pos;
-    tf_token_list do_node;
 } tf_loop_box;
 
 void tf_init_ops(tf_op_list* operations) {
@@ -247,6 +243,10 @@ void tf_push_op(tf_stack* stack, tf_byte op_index) {
 
 void tf_init(tf_context* ctx) {
     tf_init_ops(&(ctx -> ops));
+    tf_add_op(&(ctx -> ops), "HALT");
+    tf_add_op(&(ctx -> ops), "RETURN");
+    tf_add_op(&(ctx -> ops), "R>");
+    tf_add_op(&(ctx -> ops), ">R");
     tf_add_op(&(ctx -> ops), "DUP");
     tf_add_op(&(ctx -> ops), "OVER");
     tf_add_op(&(ctx -> ops), "SWAP");
@@ -272,6 +272,8 @@ void tf_init(tf_context* ctx) {
     tf_add_op(&(ctx -> ops), "JZ");
     tf_add_op(&(ctx -> ops), "JE");
     tf_add_op(&(ctx -> ops), "JMP");
+    tf_add_op(&(ctx -> ops), "JFL");
+    tf_add_op(&(ctx -> ops), "INDEX");
     ctx -> code_stack.bytes = malloc(sizeof(tf_byte) * CODE_STACK_SIZE);
     ctx -> code_stack.cursor = 0;
     ctx -> data_stack.words = malloc(sizeof(tf_word) * DATA_STACK_SIZE);
@@ -395,43 +397,40 @@ void tf_debug_code_list(tf_token_list list) {
     }
 }
 
-void tf_remove_node_from_code_list(tf_token_list* list, int i) {
-    tf_token_list item;
-    if (i == 0) {
-        item = *list;
-        *list = item->next;
-        (*list) -> prev = item->prev;
-        free(item);
+void tf_remove_node_from_code_list(tf_token_list* list, tf_token_list node) {
+    if (node == NULL || list == NULL) {
         return;
     }
 
-    int t = 0;
-    tf_token_list code = *list;
-    while (code != NULL) {
-        if (t == i) {
-            item = code;
-            code = item->prev;
-            code -> next = item->next;
-            (item->next)->prev = code;
-            free(item);
-            return;
-        }
-        code = code -> next;
-        t++;
+    if (node->prev != NULL) {
+        node->prev->next = node->next;
+    } else {
+        *list = node->next;
     }
+
+    if (node->next != NULL) {
+        node->next->prev = node->prev;
+    }
+
+    free(node);
 }
 
-void tf_update_node_value_in_code_list(tf_token_list* list, int i, const char* value) {
-    tf_token_list code = *list;
-    int t = 0;
-    while (code != NULL) {
-        if (t == i) {
-            memcpy(code->value, value, strlen(value));
-            code->value[strlen(value)] = '\0';
-        }
-        code = code -> next;
-        t++;
-    }    
+void tf_insert_after_node(tf_token_list node, const char* value) {
+    if (node == NULL) {
+        return;
+    }
+
+    tf_token_list new_node = malloc(sizeof(tf_token_list_item));
+    if (new_node == NULL) exit(-1);
+    strcpy(new_node->value, value);
+
+    new_node->prev = node;
+    new_node->next = node->next;
+
+    if (node->next != NULL) {
+        node->next->prev = new_node;
+    }
+    node->next = new_node;
 }
 
 void tf_add_node_to_code_list(tf_token_list* list, int i, const char* value) {
@@ -486,14 +485,13 @@ void tf_macro_parse(tf_context* ctx, tf_token_list* code) {
             }
             if_stack[if_i++].if_pos = t;
             if_stack[if_i-1].if_node = token;
-            strcpy(token->value, "10");
+            if_stack[if_i-1].else_node = NULL; // expect no ELSE by default
             tf_add_node_to_code_list(code, t, "JZ");
             token = token -> next;
             t++;
         } else if (strcmp(token->value, "ELSE") == 0) {
             if_stack[if_i-1].else_pos = t + 2;
             if_stack[if_i-1].else_node = token;
-            strcpy(token->value, "20");
             tf_add_node_to_code_list(code, t, "JMP");
             token = token -> next;
             t++;
@@ -501,14 +499,23 @@ void tf_macro_parse(tf_context* ctx, tf_token_list* code) {
             if_stack[if_i-1].then_pos = t;
             char else_address[32] = {0};
             char then_address[32] = {0};
-            snprintf(else_address, sizeof(else_address), "%d", if_stack[if_i-1].else_pos);
             snprintf(then_address, sizeof(then_address), "%d", if_stack[if_i-1].then_pos);
-            
-            tf_remove_node_from_code_list(code, t);
-            token = token -> prev;
-            t--;
-            strcpy(if_stack[if_i-1].if_node->value, else_address);
-            strcpy(if_stack[if_i-1].else_node->value, then_address);
+
+            if (token->next != NULL) {
+                tf_token_list node = token;
+                token = token -> prev;
+                tf_remove_node_from_code_list(code, node);
+                t--;
+            } else {
+                strcpy(token->value, "HALT");
+            }
+            if (if_stack[if_i-1].else_node != NULL) {
+                snprintf(else_address, sizeof(else_address), "%d", if_stack[if_i-1].else_pos);
+                strcpy(if_stack[if_i-1].if_node->value, else_address);
+                strcpy(if_stack[if_i-1].else_node->value, then_address);
+            } else {
+                strcpy(if_stack[if_i-1].if_node->value, then_address);
+            }
             if_i--;
         } else if (strcmp(token->value, "BEGIN") == 0) {
             if (while_i >= MAX_NESTED_CYCLES) {
@@ -516,44 +523,62 @@ void tf_macro_parse(tf_context* ctx, tf_token_list* code) {
                 exit(-1);
             }
             while_stack[while_i++].begin_pos = t;
-            tf_remove_node_from_code_list(code, t);
+            tf_token_list node = token;
             token = token -> prev;
+            tf_remove_node_from_code_list(code, node);
             t--;
         } else if (strcmp(token->value, "WHILE") == 0) {
             while_stack[while_i-1].while_node = token;
-            strcpy(token->value, "10");
-            tf_add_node_to_code_list(code, t, "JZ");
+            tf_insert_after_node(token, "JZ");
             token = token -> next;
             t++;
         } else if (strcmp(token->value, "REPEAT") == 0) {
-            while_stack[while_i-1].repeat_pos = t+2;
-            while_stack[while_i-1].repeat_node = token;
-            strcpy(token->value, "10");
-            tf_add_node_to_code_list(code, t, "JMP");
-            token = token -> next;
-            t++;
+            tf_insert_after_node(token, "JMP");
+
             char begin_address[32] = {0};
             char repeat_address[32] = {0};
             snprintf(begin_address, sizeof(begin_address), "%d", while_stack[while_i-1].begin_pos);
-            snprintf(repeat_address, sizeof(repeat_address), "%d", while_stack[while_i-1].repeat_pos);
+            snprintf(repeat_address, sizeof(repeat_address), "%d", t + 2);
+
             strcpy(while_stack[while_i-1].while_node->value, repeat_address);
-            strcpy(while_stack[while_i-1].repeat_node->value, begin_address);
+            strcpy(token->value, begin_address);
+
+            token = token -> next;
+            t++;
             while_i--;
         } else if (strcmp(token->value, "UNTIL") == 0) {
-            while_stack[while_i-1].repeat_node = token;
-            strcpy(token->value, "10");
-            tf_add_node_to_code_list(code, t, "JZ");
+            tf_insert_after_node(token, "JZ");
+
+            char begin_address[32] = {0};
+            snprintf(begin_address, sizeof(begin_address), "%d", while_stack[while_i-1].begin_pos);
+
+            strcpy(token->value, begin_address);
+
             token = token -> next;
             t++;
-            char begin_address[32] = {0};
-            char repeat_address[32] = {0};
-            snprintf(begin_address, sizeof(begin_address), "%d", while_stack[while_i-1].begin_pos);
-            strcpy(while_stack[while_i-1].repeat_node->value, begin_address);
             while_i--;
         } else if (strcmp(token->value, "DO") == 0) {
-            // TODO
+            if (loop_i >= MAX_NESTED_CYCLES) {
+                printf("Error: Max cyclomatic complexity reached!\n");
+                exit(-1);
+            }
+            loop_stack[loop_i++].do_pos = t + 2;
+
+            strcpy(token->value, ">R");
+            tf_insert_after_node(token, ">R");
+
+            token = token -> next;
+            t++;
         } else if (strcmp(token->value, "LOOP") == 0) {
-            // TODO
+            char do_address[32] = {0};
+            snprintf(do_address, sizeof(do_address), "%d", loop_stack[loop_i-1].do_pos);
+
+            strcpy(token->value, do_address);
+            tf_insert_after_node(token, "JFL");
+
+            token = token -> next;
+            t++;
+            loop_i--;
         }
         
         token = token -> next;
@@ -573,30 +598,31 @@ void tf_base_parse(tf_context* ctx, tf_token_list list) {
     tf_token_list code = list;
     while (code != NULL) {
         char* token = code -> value;
-        int read_integer = sscanf(token, "%d", &integer_value);
-        int read_float = sscanf(token, "%f", &float_value);
-        int read_char = sscanf(token, "'%c'", &char_value);
-        int read_true = sscanf(token, "true");
-        int read_false = sscanf(token, "false");
-        int read_pointer = sscanf(token, "0x%x", &pointer_value);
         
         // keeping track of word addresses
         ctx->word_address[j++] = ctx->code_stack.cursor;
 
-        if (read_integer) {
-            tf_code_push_int(ctx, integer_value);
-        } else if (read_float) {
-            tf_code_push_float(ctx, float_value);
-        } else if (read_char) {
-            tf_code_push_char(ctx, char_value);
-        } else if (read_true || read_false) {
-            tf_code_push_bool(ctx, read_true);
-        } else if (read_pointer) {
-            tf_code_push_int(ctx, pointer_value);
+        tf_byte op_index = tf_look_for_op(ctx, token, &op);
+        if (op != NULL) {
+            tf_code_push_op(ctx, op_index);
         } else {
-            tf_byte op_index = tf_look_for_op(ctx, token, &op);
-            if (op != NULL) {
-                tf_code_push_op(ctx, op_index);
+            int read_integer = sscanf(token, "%d", &integer_value);
+            int read_float = sscanf(token, "%f", &float_value);
+            int read_char = sscanf(token, "'%c'", &char_value);
+            int read_true = strcmp(token, "true") == 0;
+            int read_false = strcmp(token, "false") == 0;
+            int read_pointer = sscanf(token, "0x%x", &pointer_value);
+
+            if (read_integer) {
+                tf_code_push_int(ctx, integer_value);
+            } else if (read_float) {
+                tf_code_push_float(ctx, float_value);
+            } else if (read_char) {
+                tf_code_push_char(ctx, char_value);
+            } else if (read_true || read_false) {
+                tf_code_push_bool(ctx, read_true);
+            } else if (read_pointer) {
+                tf_code_push_int(ctx, pointer_value);
             } else {
                 printf("Unknown token: %s\n", token);
                 exit(-1);
